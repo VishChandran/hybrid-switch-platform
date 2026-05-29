@@ -1,4 +1,5 @@
 const { resolveScenario } = require("./scenarioResolverService");
+const { selectSwitchNode } = require("./switchNodeSelectorService");
 const { routeToIssuer } = require("./issuerGatewayService");
 const { validatePin } = require("./pinValidationService");
 const { authorizeTransaction } = require("./authorizationService");
@@ -10,6 +11,7 @@ const { buildAnalyticsEvent } = require("./analyticsEventService");
 
 function processTransaction(transaction) {
   const transactionId = `TXN-${Date.now()}`;
+  const switchNode = selectSwitchNode(transactionId);
   const scenario = resolveScenario(transaction);
   const issuerRouting = routeToIssuer(transaction);
   const pinValid = validatePin(transaction.pin);
@@ -31,6 +33,7 @@ function processTransaction(transaction) {
 
 const response = {
   transactionId,
+  switchNode,
   status: authorizationResult.status,
   reason: authorizationResult.reason,
   network: transaction.network,
