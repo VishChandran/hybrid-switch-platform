@@ -4,6 +4,7 @@ const { selectSwitchNode } = require("./switchNodeSelectorService");
 const { routeToIssuer } = require("./issuerGatewayService");
 const { validatePin } = require("./pinValidationService");
 const { authorizeTransaction } = require("./authorizationService");
+const { buildReversalEvent } = require("./reversalEventService")
 const { processStandIn } = require("./standInProcessingService");
 const { publishEvent } = require("./eventPublisherService");
 const { saveTransaction } = require("../store/transactionStore");
@@ -80,6 +81,12 @@ const fraudEvent =
   );
 
 const settlementEvent = buildSettlementEvent(response, transaction);
+const reversalEvent =
+  buildReversalEvent(
+    response,
+    transaction
+  );
+  
 const analyticsEvent = buildAnalyticsEvent(response, transaction);
 
 saveTransaction(response);
@@ -96,6 +103,12 @@ if (settlementEvent) {
   publishEvent(
     "SETTLEMENT_EVENT",
     settlementEvent
+  );
+}
+if (reversalEvent) {
+  publishEvent(
+    "REVERSAL_EVENT",
+    reversalEvent
   );
 }
 publishEvent(
