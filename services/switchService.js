@@ -4,6 +4,7 @@ const { validatePin } = require("./pinValidationService");
 const { authorizeTransaction } = require("./authorizationService");
 const { publishEvent } = require("./eventPublisherService");
 const { saveTransaction } = require("../store/transactionStore");
+const { buildFraudEvent } = require("./fraudEventService");
 
 function processTransaction(transaction) {
   const transactionId = `TXN-${Date.now()}`;
@@ -37,11 +38,21 @@ const response = {
   pinValid
 };
 
+const fraudEvent =
+  buildFraudEvent(
+    response,
+    transaction
+  );
+
 saveTransaction(response);
 
 publishEvent(
   "AUTHORIZATION_EVENT",
   response
+);
+publishEvent(
+  "FRAUD_EVENT",
+  fraudEvent
 );
 
 return response;
