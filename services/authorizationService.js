@@ -1,4 +1,21 @@
+const { getAccount } = require("./accountService");
+
 function authorizeTransaction(transaction) {
+  const account = getAccount(transaction.cardNumber);
+
+  if (!account) {
+    return {
+      status: "DECLINED",
+      reason: "ACCOUNT_NOT_FOUND"
+    };
+  }
+
+  if (account.accountStatus !== "ACTIVE") {
+    return {
+      status: "DECLINED",
+      reason: "ACCOUNT_INACTIVE"
+    };
+  }
 
   if (transaction.amount > 1000) {
     return {
@@ -7,9 +24,18 @@ function authorizeTransaction(transaction) {
     };
   }
 
+  if (transaction.amount > account.availableBalance) {
+    return {
+      status: "DECLINED",
+      reason: "INSUFFICIENT_FUNDS"
+    };
+  }
+
   return {
     status: "APPROVED",
-    reason: "APPROVED"
+    reason: "APPROVED",
+    accountId: account.accountId,
+    availableBalance: account.availableBalance
   };
 }
 
