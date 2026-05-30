@@ -78,8 +78,6 @@ Reversal Generated
 - Node.js
 - Express
 - REST APIs
-- Event-driven processing
-- In-memory transaction store
 
 ## Running Locally
 
