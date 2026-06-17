@@ -66,6 +66,7 @@ curl -X POST http://localhost:3000/transactions \
   -d '{
     "transactionType": "PURCHASE",
     "channel": "POS",
+    "cardEntryMode": "CHIP",
     "network": "INTERAC",
     "cardNumber": "4000011234567890",
     "amount": 25,
@@ -73,7 +74,7 @@ curl -X POST http://localhost:3000/transactions \
   }'
 ```
 
-The sample card and PIN are test data built into the simulator. A successful response includes a UUID-based transaction ID, the selected switch node, the routed issuer, and the authorization result.
+The sample card and PIN are test data built into the simulator. With `cardEntryMode` set to `CHIP`, this request resolves to the `INTERAC_POS_PHYSICAL` scenario. A successful response also includes a UUID-based transaction ID, the selected switch node, the routed issuer, and the authorization result.
 
 Balance inquiries may omit `amount`. Purchases and cash withdrawals require a non-negative numeric amount.
 
