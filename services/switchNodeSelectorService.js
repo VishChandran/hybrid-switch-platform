@@ -1,9 +1,11 @@
 const switchNodes = ["Switch-A", "Switch-B"];
 const { getNodeStatus } = require("./nodeHealthService");
 
-function selectSwitchNode(transactionId) {
-  const timestampPart = Number(transactionId.split("-")[1]);
-  const nodeIndex = timestampPart % switchNodes.length;
+let nextNodeIndex = 0;
+
+function selectSwitchNode() {
+  const nodeIndex = nextNodeIndex;
+  nextNodeIndex = (nextNodeIndex + 1) % switchNodes.length;
 
   const selectedNode = switchNodes[nodeIndex];
 

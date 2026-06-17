@@ -3,8 +3,9 @@ const { getTransaction } = require("../store/transactionStore");
 
 function createTransaction(req, res) {
   const result = processTransaction(req.body);
+  const statusCode = result.status === "SYSTEM_UNAVAILABLE" ? 503 : 202;
 
-  res.status(202).json(result);
+  res.status(statusCode).json(result);
 }
 
 function getTransactionById(req, res) {

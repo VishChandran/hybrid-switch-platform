@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { getIssuerResponse } = require("./issuerResponseService");
 const { resolveScenario } = require("./scenarioResolverService");
 const { selectSwitchNode } = require("./switchNodeSelectorService");
@@ -13,10 +14,29 @@ const { buildSettlementEvent } = require("./settlementEventService");
 const { buildAnalyticsEvent } = require("./analyticsEventService");
 
 function processTransaction(transaction) {
-  const transactionId = `TXN-${Date.now()}`;
-  const switchNode = selectSwitchNode(transactionId);
+  const transactionId = `TXN-${crypto.randomUUID()}`;
+  const switchNode = selectSwitchNode();
   const scenario = resolveScenario(transaction);
   const issuerRouting = routeToIssuer(transaction);
+
+  if (switchNode === "NO_ACTIVE_NODE") {
+    const response = {
+      transactionId,
+      switchNode,
+      status: "SYSTEM_UNAVAILABLE",
+      reason: "NO_ACTIVE_SWITCH_NODE",
+      network: transaction.network,
+      channel: transaction.channel,
+      scenario,
+      issuerRouting
+    };
+
+    saveTransaction(response);
+    publishEvent("AUTHORIZATION_EVENT", response);
+    publishEvent("ANALYTICS_EVENT", buildAnalyticsEvent(response, transaction));
+    return response;
+  }
+
   const issuerResponse = getIssuerResponse(transaction);
   if (issuerResponse.status === "TIMEOUT") {
     const standInResult = processStandIn(transaction);
