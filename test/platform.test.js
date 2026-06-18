@@ -21,6 +21,7 @@ function validTransaction(overrides = {}) {
   return {
     transactionType: "PURCHASE",
     channel: "POS",
+    cardEntryMode: "CHIP",
     network: "INTERAC",
     cardNumber: "4000011234567890",
     amount: 25,
@@ -38,6 +39,24 @@ function transactionRequest(baseUrl, transaction, apiKey = "test-client-key") {
     },
     body: JSON.stringify(transaction)
   });
+}
+
+async function capturePublishedEventTypes(run) {
+  const originalLog = console.log;
+  const eventTypes = [];
+
+  console.log = message => {
+    const match = typeof message === "string" && message.match(/\[EVENT\] ([A-Z_]+)/);
+    if (match) {
+      eventTypes.push(match[1]);
+    }
+  };
+
+  try {
+    return { result: await run(), eventTypes };
+  } finally {
+    console.log = originalLog;
+  }
 }
 
 test("transaction API requires a client API key", async () => {
@@ -103,6 +122,81 @@ test("transaction IDs are UUID based", async () => {
       body.transactionId,
       /^TXN-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
     );
+  });
+});
+
+test("invalid PIN cannot be stand-in approved after issuer timeout", async () => {
+  setNodeStatus("Switch-A", "UP");
+  setNodeStatus("Switch-B", "UP");
+
+  await withServer(async baseUrl => {
+    const { result, eventTypes } = await capturePublishedEventTypes(() =>
+      transactionRequest(
+        baseUrl,
+        validTransaction({ pin: "WRONG", simulateTimeoutAttempts: 2 })
+      )
+    );
+    const body = await result.json();
+
+    assert.equal(body.status, "DECLINED");
+    assert.equal(body.reason, "INVALID_PIN");
+    assert.deepEqual(eventTypes, ["AUTHORIZATION_EVENT", "ANALYTICS_EVENT"]);
+  });
+});
+
+test("invalid PIN decline can be retrieved by transaction ID", async () => {
+  await withServer(async baseUrl => {
+    const createResponse = await transactionRequest(
+      baseUrl,
+      validTransaction({ pin: "WRONG" })
+    );
+    const created = await createResponse.json();
+    const getResponse = await fetch(
+      `${baseUrl}/transactions/${created.transactionId}`,
+      { headers: { "x-api-key": "test-client-key" } }
+    );
+    const stored = await getResponse.json();
+
+    assert.equal(getResponse.status, 200);
+    assert.equal(stored.status, "DECLINED");
+    assert.equal(stored.reason, "INVALID_PIN");
+  });
+});
+
+test("reversal scenario suppresses settlement event", async () => {
+  await withServer(async baseUrl => {
+    const { result, eventTypes } = await capturePublishedEventTypes(() =>
+      transactionRequest(
+        baseUrl,
+        validTransaction({ simulatePostAuthFailure: true })
+      )
+    );
+    const body = await result.json();
+
+    assert.equal(body.status, "APPROVED");
+    assert(eventTypes.includes("REVERSAL_EVENT"));
+    assert(!eventTypes.includes("SETTLEMENT_EVENT"));
+  });
+});
+
+test("stand-in approval publishes settlement event", async () => {
+  await withServer(async baseUrl => {
+    const { result, eventTypes } = await capturePublishedEventTypes(() =>
+      transactionRequest(
+        baseUrl,
+        validTransaction({ simulateTimeoutAttempts: 2 })
+      )
+    );
+    const body = await result.json();
+
+    assert.equal(body.status, "APPROVED");
+    assert.equal(body.reason, "STAND_IN_APPROVED");
+    assert.deepEqual(eventTypes, [
+      "AUTHORIZATION_EVENT",
+      "FRAUD_EVENT",
+      "SETTLEMENT_EVENT",
+      "ANALYTICS_EVENT"
+    ]);
   });
 });
 

@@ -5,13 +5,18 @@ const { selectSwitchNode } = require("./switchNodeSelectorService");
 const { routeToIssuer } = require("./issuerGatewayService");
 const { validatePin } = require("./pinValidationService");
 const { authorizeTransaction } = require("./authorizationService");
-const { buildReversalEvent } = require("./reversalEventService")
+const { buildReversalEvent } = require("./reversalEventService");
 const { processStandIn } = require("./standInProcessingService");
 const { publishEvent } = require("./eventPublisherService");
 const { saveTransaction } = require("../store/transactionStore");
 const { buildFraudEvent } = require("./fraudEventService");
 const { buildSettlementEvent } = require("./settlementEventService");
 const { buildAnalyticsEvent } = require("./analyticsEventService");
+
+function publishAuthorizationAndAnalytics(response, transaction) {
+  publishEvent("AUTHORIZATION_EVENT", response);
+  publishEvent("ANALYTICS_EVENT", buildAnalyticsEvent(response, transaction));
+}
 
 function processTransaction(transaction) {
   const transactionId = `TXN-${crypto.randomUUID()}`;
@@ -32,44 +37,16 @@ function processTransaction(transaction) {
     };
 
     saveTransaction(response);
-    publishEvent("AUTHORIZATION_EVENT", response);
-    publishEvent("ANALYTICS_EVENT", buildAnalyticsEvent(response, transaction));
+    publishAuthorizationAndAnalytics(response, transaction);
     return response;
   }
 
-  const issuerResponse = getIssuerResponse(transaction);
-  if (issuerResponse.status === "TIMEOUT") {
-    const standInResult = processStandIn(transaction);
-    const response = {
-    transactionId,
-    switchNode,
-    status: standInResult.status,
-    reason: standInResult.reason,
-    network: transaction.network,
-    channel: transaction.channel,
-    scenario,
-    issuerRouting
-  };
-
-  const analyticsEvent = buildAnalyticsEvent(response, transaction);
-  saveTransaction(response);
-
-  publishEvent(
-    "AUTHORIZATION_EVENT",
-    response
-  );
-  publishEvent(
-  "ANALYTICS_EVENT",
-  analyticsEvent
-);
-
-  return response;
-}
   const pinValid = validatePin(transaction.pin);
 
   if (!pinValid) {
-    return {
+    const response = {
       transactionId,
+      switchNode,
       status: "DECLINED",
       reason: "INVALID_PIN",
       network: transaction.network,
@@ -78,64 +55,79 @@ function processTransaction(transaction) {
       issuerRouting,
       pinValid
     };
+
+    saveTransaction(response);
+    publishAuthorizationAndAnalytics(response, transaction);
+    return response;
+  }
+
+  const issuerResponse = getIssuerResponse(transaction);
+
+  if (issuerResponse.status === "TIMEOUT") {
+    const standInResult = processStandIn(transaction);
+    const response = {
+      transactionId,
+      switchNode,
+      status: standInResult.status,
+      reason: standInResult.reason,
+      network: transaction.network,
+      channel: transaction.channel,
+      scenario,
+      issuerRouting,
+      pinValid
+    };
+
+    saveTransaction(response);
+    publishEvent("AUTHORIZATION_EVENT", response);
+
+    if (response.status === "APPROVED") {
+      publishEvent("FRAUD_EVENT", buildFraudEvent(response, transaction));
+
+      const settlementEvent = buildSettlementEvent(response, transaction);
+      if (settlementEvent) {
+        publishEvent("SETTLEMENT_EVENT", settlementEvent);
+      }
+    }
+
+    publishEvent("ANALYTICS_EVENT", buildAnalyticsEvent(response, transaction));
+    return response;
   }
 
   const authorizationResult = authorizeTransaction(transaction);
 
-const response = {
-  transactionId,
-  switchNode,
-  status: authorizationResult.status,
-  reason: authorizationResult.reason,
-  network: transaction.network,
-  channel: transaction.channel,
-  scenario,
-  issuerRouting,
-  pinValid
-};
+  const response = {
+    transactionId,
+    switchNode,
+    status: authorizationResult.status,
+    reason: authorizationResult.reason,
+    network: transaction.network,
+    channel: transaction.channel,
+    scenario,
+    issuerRouting,
+    pinValid
+  };
 
-const fraudEvent =
-  buildFraudEvent(
-    response,
-    transaction
-  );
+  const fraudEvent = buildFraudEvent(response, transaction);
+  const reversalEvent = buildReversalEvent(response, transaction);
+  const settlementEvent = reversalEvent
+    ? null
+    : buildSettlementEvent(response, transaction);
+  const analyticsEvent = buildAnalyticsEvent(response, transaction);
 
-const settlementEvent = buildSettlementEvent(response, transaction);
-const reversalEvent =
-  buildReversalEvent(
-    response,
-    transaction
-  );
-  
-const analyticsEvent = buildAnalyticsEvent(response, transaction);
+  saveTransaction(response);
+  publishEvent("AUTHORIZATION_EVENT", response);
+  publishEvent("FRAUD_EVENT", fraudEvent);
 
-saveTransaction(response);
+  if (settlementEvent) {
+    publishEvent("SETTLEMENT_EVENT", settlementEvent);
+  }
 
-publishEvent(
-  "AUTHORIZATION_EVENT",
-  response
-);
-publishEvent(
-  "FRAUD_EVENT",
-  fraudEvent
-);
-if (settlementEvent) {
-  publishEvent(
-    "SETTLEMENT_EVENT",
-    settlementEvent
-  );
-}
-if (reversalEvent) {
-  publishEvent(
-    "REVERSAL_EVENT",
-    reversalEvent
-  );
-}
-publishEvent(
-  "ANALYTICS_EVENT",
-  analyticsEvent
-);
-return response;
+  if (reversalEvent) {
+    publishEvent("REVERSAL_EVENT", reversalEvent);
+  }
+
+  publishEvent("ANALYTICS_EVENT", analyticsEvent);
+  return response;
 }
 
 module.exports = {
