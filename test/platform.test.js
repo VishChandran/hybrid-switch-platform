@@ -258,6 +258,17 @@ test("approved transaction is persisted and can be retrieved", async () => {
     assert.equal(createResponse.status, 202);
     assert.equal(getResponse.status, 200);
     assert.deepEqual(stored, created);
+    assert.deepEqual(
+      stored.lifecycle.map(step => step.state),
+      [
+        "RECEIVED",
+        "SWITCH_NODE_SELECTED",
+        "ISSUER_ROUTED",
+        "PIN_VALIDATED",
+        "ISSUER_RESPONSE_EVALUATED",
+        "AUTHORIZED"
+      ]
+    );
   });
 });
 
@@ -382,6 +393,8 @@ test("readiness and metrics endpoints return simulator status", async () => {
     assert.equal(metrics.status, 200);
     assert(body.totalTransactions >= 1);
     assert(body.approved >= 1);
+    assert(body.deadLetterCount >= 1);
+    assert(body.failedEventCount >= 1);
     assert(body.eventCounts.AUTHORIZATION_EVENT.PROCESSED >= 1);
   });
 });

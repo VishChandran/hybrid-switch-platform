@@ -16,6 +16,7 @@ The simulator covers routing, authorization, switch-node failover, issuer timeou
 - Simulated issuer timeouts, retries, and stand-in processing
 - Authorization, fraud, settlement, reversal, and analytics events
 - Topic mapping, an outbox table, and in-process consumer simulation
+- A visible transaction lifecycle so each decision phase is easy to trace
 - Optional PostgreSQL persistence for transactions, idempotency keys, event history, and dead-letter records
 - Health, readiness, and simple JSON metrics endpoints
 
@@ -43,7 +44,9 @@ PIN and account authorization
 Event publishing and consumer simulation
 ```
 
-Events are first written to the outbox model as `PENDING`, then the simulator attempts to consume them in-process. Successful events move to `PROCESSED`. Failed events move to `FAILED` and are copied to the dead-letter model with the failure reason and payload.
+Every response includes a small `lifecycle` array. It is not meant to be a production audit log; it is there to make the switch flow easier to reason about. A normal approval moves through states such as `RECEIVED`, `SWITCH_NODE_SELECTED`, `ISSUER_ROUTED`, `PIN_VALIDATED`, `ISSUER_RESPONSE_EVALUATED`, and `AUTHORIZED`.
+
+Events are first written to the outbox model as `PENDING`. A separate outbox processor function then consumes the event in-process. Successful events move to `PROCESSED`. Failed events move to `FAILED` and are copied to the dead-letter model with the failure reason and payload. This keeps the outbox pattern visible without adding a real broker.
 
 If the selected switch node is down, the other node is used. If neither node is available, processing stops immediately and the API returns `503 SYSTEM_UNAVAILABLE`. The request does not continue into issuer authorization.
 
@@ -68,6 +71,12 @@ npm start
 ```
 
 If `DATABASE_URL` is not set, the same interfaces use in-memory fallback stores so the simulator remains easy to run during learning and tests.
+
+To apply the small schema explicitly when PostgreSQL is configured:
+
+```bash
+DATABASE_URL=postgres://user:password@localhost:5432/hybrid_switch npm run migrate
+```
 
 Check that the service is running:
 
@@ -111,7 +120,7 @@ Balance inquiries may omit `amount`. Purchases and cash withdrawals require a no
 
 POS requests require `cardEntryMode` set to `CHIP` or `NFC`. ATM requests require `atmOwnership` set to `ISSUER_ATM` or `NON_ISSUER_ATM`.
 
-The optional `x-idempotency-key` header makes retries predictable. Reusing a key with the same body returns the original response; reusing it with a different body returns `409 Conflict`. When `DATABASE_URL` is configured, idempotency records are persisted in PostgreSQL. Without PostgreSQL, they use the local in-memory fallback and reset when the app restarts.
+The optional `x-idempotency-key` header makes retries predictable. The simulator claims an idempotency key before processing starts, then completes the record with the response. Reusing a completed key with the same body returns the original response; reusing it with a different body returns `409 Conflict`; reusing it while the original request is still processing also returns `409 Conflict`. When `DATABASE_URL` is configured, idempotency records are persisted in PostgreSQL. Without PostgreSQL, they use the local in-memory fallback and reset when the app restarts.
 
 For failure-flow demonstrations, `simulateTimeoutAttempts` accepts an integer from `0` to `2`, and `simulatePostAuthFailure` accepts a boolean. These fields are simulation controls, not payment-network fields.
 
@@ -153,7 +162,7 @@ curl -X POST http://localhost:3000/admin/node-status \
 npm test
 ```
 
-The tests exercise API-key protection, scenario and simulation validation, idempotency replay/conflict behavior, UUID transaction IDs, balance inquiry behavior, PIN and stand-in handling, reversal events, outbox recording, dead-letter handling, readiness/metrics endpoints, admin validation, and the all-nodes-down path.
+The tests exercise API-key protection, scenario and simulation validation, idempotency replay/conflict behavior, UUID transaction IDs, balance inquiry behavior, PIN and stand-in handling, transaction lifecycle states, reversal events, outbox recording, dead-letter handling, readiness/metrics endpoints, admin validation, and the all-nodes-down path.
 
 ## Deliberately Simplified
 
@@ -178,8 +187,11 @@ The simulator now includes a few practical safety boundaries without changing it
 - Validation for transaction fields, amounts, PAN shape, transaction types, and channels
 - Conditional validation for POS entry modes and ATM ownership
 - Lightweight idempotency for request retries
+- Idempotency key claiming before transaction processing
 - PostgreSQL-backed idempotency when `DATABASE_URL` is configured
 - Durable transaction, outbox event, and dead-letter models
+- Separate outbox processor function so the event lifecycle is easier to learn
+- Transaction lifecycle states in API responses
 - Basic readiness and metrics endpoints
 - A 10 KB JSON request limit
 - Basic transaction and admin rate limits

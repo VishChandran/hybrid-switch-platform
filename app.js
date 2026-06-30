@@ -8,6 +8,7 @@ const { createRateLimiter } = require("./middleware/rateLimiter");
 const { checkDatabase } = require("./db/postgres");
 const { getTransactionMetrics } = require("./store/transactionStore");
 const { getEventMetrics } = require("./store/outboxStore");
+const { getDeadLetterMetrics } = require("./store/deadLetterStore");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,6 +39,7 @@ app.get("/ready", async (req, res) => {
 app.get("/metrics", async (req, res) => {
   const transactionMetrics = await getTransactionMetrics();
   const eventRows = await getEventMetrics();
+  const deadLetterMetrics = await getDeadLetterMetrics();
 
   const eventCounts = eventRows.reduce((counts, row) => {
     const eventType = row.event_type;
@@ -57,6 +59,11 @@ app.get("/metrics", async (req, res) => {
       eventCounts.REVERSAL_EVENT && eventCounts.REVERSAL_EVENT.PROCESSED
         ? eventCounts.REVERSAL_EVENT.PROCESSED
         : 0,
+    failedEventCount: Object.values(eventCounts).reduce(
+      (total, statuses) => total + Number(statuses.FAILED || 0),
+      0
+    ),
+    deadLetterCount: Number(deadLetterMetrics.total || 0),
     eventCounts
   });
 });

@@ -44,7 +44,19 @@ async function listDeadLetters() {
   return [...deadLetters];
 }
 
+async function getDeadLetterMetrics() {
+  if (isDatabaseConfigured()) {
+    const result = await query("SELECT COUNT(*)::int AS total FROM dead_letter");
+    return result.rows[0];
+  }
+
+  return {
+    total: deadLetters.length
+  };
+}
+
 module.exports = {
+  getDeadLetterMetrics,
   listDeadLetters,
   saveDeadLetter
 };

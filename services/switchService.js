@@ -12,6 +12,10 @@ const { saveTransaction } = require("../store/transactionStore");
 const { buildFraudEvent } = require("./fraudEventService");
 const { buildSettlementEvent } = require("./settlementEventService");
 const { buildAnalyticsEvent } = require("./analyticsEventService");
+const {
+  addLifecycleState,
+  createLifecycle
+} = require("./transactionLifecycleService");
 
 async function publishAuthorizationAndAnalytics(response, transaction) {
   await publishEvent("AUTHORIZATION_EVENT", response);
@@ -20,11 +24,15 @@ async function publishAuthorizationAndAnalytics(response, transaction) {
 
 async function processTransaction(transaction) {
   const transactionId = `TXN-${crypto.randomUUID()}`;
+  const lifecycle = createLifecycle();
   const switchNode = selectSwitchNode();
+  addLifecycleState(lifecycle, "SWITCH_NODE_SELECTED");
   const scenario = resolveScenario(transaction);
   const issuerRouting = routeToIssuer(transaction);
+  addLifecycleState(lifecycle, "ISSUER_ROUTED");
 
   if (switchNode === "NO_ACTIVE_NODE") {
+    addLifecycleState(lifecycle, "FAILED_CLOSED");
     const response = {
       transactionId,
       switchNode,
@@ -33,7 +41,8 @@ async function processTransaction(transaction) {
       network: transaction.network,
       channel: transaction.channel,
       scenario,
-      issuerRouting
+      issuerRouting,
+      lifecycle
     };
 
     await saveTransaction(response);
@@ -42,8 +51,10 @@ async function processTransaction(transaction) {
   }
 
   const pinValid = validatePin(transaction.pin);
+  addLifecycleState(lifecycle, "PIN_VALIDATED");
 
   if (!pinValid) {
+    addLifecycleState(lifecycle, "DECLINED");
     const response = {
       transactionId,
       switchNode,
@@ -53,7 +64,8 @@ async function processTransaction(transaction) {
       channel: transaction.channel,
       scenario,
       issuerRouting,
-      pinValid
+      pinValid,
+      lifecycle
     };
 
     await saveTransaction(response);
@@ -62,9 +74,15 @@ async function processTransaction(transaction) {
   }
 
   const issuerResponse = getIssuerResponse(transaction);
+  addLifecycleState(lifecycle, "ISSUER_RESPONSE_EVALUATED");
 
   if (issuerResponse.status === "TIMEOUT") {
     const standInResult = processStandIn(transaction);
+    addLifecycleState(lifecycle, "STAND_IN_APPLIED");
+    addLifecycleState(
+      lifecycle,
+      standInResult.status === "APPROVED" ? "APPROVED" : "DECLINED"
+    );
     const response = {
       transactionId,
       switchNode,
@@ -74,7 +92,8 @@ async function processTransaction(transaction) {
       channel: transaction.channel,
       scenario,
       issuerRouting,
-      pinValid
+      pinValid,
+      lifecycle
     };
 
     await saveTransaction(response);
@@ -94,6 +113,7 @@ async function processTransaction(transaction) {
   }
 
   const authorizationResult = authorizeTransaction(transaction);
+  addLifecycleState(lifecycle, "AUTHORIZED");
 
   const response = {
     transactionId,
@@ -104,11 +124,15 @@ async function processTransaction(transaction) {
     channel: transaction.channel,
     scenario,
     issuerRouting,
-    pinValid
+    pinValid,
+    lifecycle
   };
 
   const fraudEvent = buildFraudEvent(response, transaction);
   const reversalEvent = buildReversalEvent(response, transaction);
+  if (reversalEvent) {
+    addLifecycleState(lifecycle, "REVERSAL_REQUIRED");
+  }
   const settlementEvent = reversalEvent
     ? null
     : buildSettlementEvent(response, transaction);

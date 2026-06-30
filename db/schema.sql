@@ -13,10 +13,20 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS idempotency_keys (
   key TEXT PRIMARY KEY,
   request_hash TEXT NOT NULL,
-  response JSONB NOT NULL,
-  status_code INTEGER NOT NULL,
+  response JSONB,
+  status_code INTEGER,
+  record_status TEXT NOT NULL DEFAULT 'COMPLETED',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE idempotency_keys
+  ALTER COLUMN response DROP NOT NULL;
+
+ALTER TABLE idempotency_keys
+  ALTER COLUMN status_code DROP NOT NULL;
+
+ALTER TABLE idempotency_keys
+  ADD COLUMN IF NOT EXISTS record_status TEXT NOT NULL DEFAULT 'COMPLETED';
 
 CREATE TABLE IF NOT EXISTS outbox_events (
   event_id TEXT PRIMARY KEY,

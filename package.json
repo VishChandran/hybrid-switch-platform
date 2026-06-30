@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
+    "migrate": "node db/migrate.js",
     "test": "node --test"
   },
   "keywords": [],
